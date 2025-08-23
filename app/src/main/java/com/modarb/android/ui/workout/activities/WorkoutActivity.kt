@@ -17,15 +17,29 @@ import com.modarb.android.ui.helpers.WorkoutData
 import com.modarb.android.ui.onboarding.utils.UserPref.UserPrefUtil
 import com.modarb.android.ui.workout.ExerciseListener
 import com.modarb.android.ui.workout.adapters.ExercisePagerAdapter
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import com.google.android.gms.wearable.Wearable
 import com.modarb.android.ui.workout.presentation.WorkoutViewModel
 import kotlinx.coroutines.launch
-
 
 class WorkoutActivity : AppCompatActivity(), ExerciseListener {
 
     private lateinit var binding: ActivityWorkoutBinding
     private lateinit var adapter: ExercisePagerAdapter
     private val workoutViewModel: WorkoutViewModel by viewModels()
+    private val dataClient by lazy { Wearable.getDataClient(this) }
+
+    private val workoutControlReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.getStringExtra("command")) {
+                "pause" -> handlePause()
+                "next" -> handleNext()
+            }
+        }
+    }
 
     @SuppressLint("SetTextI18n")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -36,10 +50,90 @@ class WorkoutActivity : AppCompatActivity(), ExerciseListener {
         initViewPager()
         disableViewPagerScroll()
         handleNavigationButtons()
-        incrementSetCount()
+        setupIncrementButton()
         checkButtonState()
         observeViewModel()
+        sendWorkoutDataToWatch()
+        LocalBroadcastManager.getInstance(this).registerReceiver(workoutControlReceiver, IntentFilter("workout-control"))
     }
+
+    private fun handleNext() {
+        val currentItem = binding.exercisePager.currentItem
+
+        if (adapter.isTimedExercise(currentItem)) {
+            if (!adapter.isTimedExerciseDone(currentItem)) {
+                Toast.makeText(
+                    this, getString(R.string.complete_the_exercise_first), Toast.LENGTH_SHORT
+                ).show()
+                return
+            }
+
+        } else if (!adapter.isExerciseDone(currentItem)) {
+            Toast.makeText(
+                this, getString(R.string.complete_the_exercise_first), Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+        adapter.stopSound(currentItem)
+        adapter.startSound(currentItem)
+        val adapterCount = adapter.count - 1
+        if (currentItem < adapterCount) {
+            binding.exercisePager.setCurrentItem(currentItem + 1, true)
+            adapter.logExercise(binding.exercisePager.currentItem)
+            adapter.startHelpSound(binding.exercisePager.currentItem)
+            checkButtonState()
+        } else {
+            markWorkoutDone()
+        }
+    }
+
+    private fun handlePause() {
+        val currentPosition = binding.exercisePager.currentItem
+        if (adapter.isTimedExercise(currentPosition)) {
+            if (!adapter.isStarted(currentPosition)) {
+                adapter.initTimer(currentPosition, binding.exercisePager.findViewWithTag("view$currentPosition"))
+                adapter.startTimer(currentPosition)
+                binding.incButton.setImageResource(R.drawable.ic_pause)
+            } else {
+                binding.incButton.setImageResource(R.drawable.ic_play)
+                adapter.pauseTimer(currentPosition)
+            }
+        }
+    }
+    
+    private fun setupIncrementButton() {
+        binding.incButton.setOnClickListener {
+            val currentPosition = binding.exercisePager.currentItem
+            if (adapter.isTimedExercise(currentPosition)) {
+                handlePause()
+            } else {
+                Toast.makeText(this, "Go for the next exercise !", Toast.LENGTH_SHORT).show()
+                adapter.markDone(currentPosition)
+            }
+        }
+    }
+
+    private fun sendWorkoutDataToWatch() {
+        val currentPosition = binding.exercisePager.currentItem
+        val exercise = adapter.getExerciseName(currentPosition)
+        val timer = "00:00" // You need to get the actual timer value
+        val heartRate = "-- BPM" // You need to get the actual heart rate
+        val calories = "-- kcal" // You need to get the actual calories
+
+        val dataMap = com.google.android.gms.wearable.DataMap().apply {
+            putString("exercise", exercise)
+            putString("timer", timer)
+            putString("heart_rate", heartRate)
+            putString("calories", calories)
+        }
+
+        val request = com.google.android.gms.wearable.PutDataMapRequest.create("/workout_data").apply {
+            dataMap.putAll(dataMap)
+        }.asPutDataRequest().setUrgent()
+
+        dataClient.putDataItem(request)
+    }
+
 
     private fun checkButtonState() {
         val currentPosition = binding.exercisePager.currentItem
@@ -171,6 +265,7 @@ class WorkoutActivity : AppCompatActivity(), ExerciseListener {
     override fun onDestroy() {
         super.onDestroy()
         adapter.stopSound()
+        LocalBroadcastManager.getInstance(this).unregisterReceiver(workoutControlReceiver)
     }
 
     @SuppressLint("ClickableViewAccessibility")

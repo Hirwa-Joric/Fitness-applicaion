@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "Modarb"
-include(":app")
+include(":app", ":wear")
