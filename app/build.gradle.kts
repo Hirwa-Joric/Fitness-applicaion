@@ -88,6 +88,7 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
     implementation("com.github.vipulasri:timelineview:1.1.5")
     implementation("androidx.health.connect:connect-client:1.1.0-alpha02")
+    implementation("com.google.android.gms:play-services-wearable:18.1.0")
 
 
 }
